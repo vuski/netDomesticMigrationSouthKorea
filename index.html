@@ -1,0 +1,1368 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Net Domestic Migration of Korea</title>        
+    <script src="sido.js"></script>
+    <script src="sigungu.js"></script>
+    <script src="admxy.js"></script>
+    <script src="netpopumove.js"></script>
+    
+ 
+
+    <meta name="viewport" content="width=device-width, height=device-height, user-scalable=no" />
+
+    <style type="text/css">
+
+        html {
+            min-height: 100% !important;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* border 제거 */
+        body {
+            margin-left : 0;
+            margin-right : 0;
+            margin-top : 0;
+            margin-bottom : 0;
+            border: 0;
+            background-color: black;
+        }
+        .container {
+            position: relative;
+        }
+        /* canvas를 viewport 크기로 만들기 */
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        #text {
+            background-color: transparent;  /* needed because webgl-tutoraisl.css sets canvas bg color to white */
+            position: absolute;
+            left: 0px;
+            top: 0px;
+            z-index: 10;
+            -webkit-text-fill-color: aliceblue;
+        }
+    </style>
+    <script type="text/javascript">
+
+        var gl; // A global variable for the WebGL context
+      
+       
+        // 이 코드나 관련된 데이터를 사용하실 경우, 코드에 다음의 주석을 반드시 남겨주시기 바랍니다.
+        // source :  https://github.com/vuski/netPopuMoveKorea
+
+
+        function ShaderVars() {
+            var shader;
+         
+            var zscale;
+            var translation;
+            var color;
+            var tidx;
+            var drawRatio;
+            var countThreshold;
+            var onlyNearOn;
+            var groundxy;
+
+           ShaderVars.prototype.setUniformLoc =  function () {
+                this.translation = gl.getUniformLocation(this.shader, "trans");                
+                this.zscale = gl.getUniformLocation(this.shader, "zscale");
+                this.color = gl.getUniformLocation(this.shader, "color");
+                this.tidx = gl.getUniformLocation(this.shader, "tidx");
+                this.drawRatio = gl.getUniformLocation(this.shader, "drawRatio");
+                this.countThreshold = gl.getUniformLocation(this.shader, "countThreshold");
+                this.onlyNearOn = gl.getUniformLocation(this.shader, "onlyNearOn");
+                this.groundxy = gl.getUniformLocation(this.shader, "groundxy");
+            } 
+           
+            var posAttrLoc; 
+            var cntAttrLoc; 
+            var scoreAttrLoc; 
+            var yearAttrLoc; 
+            var indexAttrLoc; 
+            
+        }
+
+        function BufferObject() {
+            var vbo;            
+            var idxbo;
+            var numObj;
+            var numIndex;
+            
+        }
+
+        var shaderSigungu;
+        var boSigungu;
+
+        var shaderSido;
+        var boSido;
+
+        var shaderPopu;
+        var boPopu;
+
+        var canvas;
+        var textCanvas; 
+        var ctx;
+        var ctxgl;
+
+        var scrW;
+        var scrH;
+        var whRatio;
+         
+        var cenX = 1015470.0;
+        var cenY = 1815322.0;
+        var zoomR = 20;
+        var minX = cenX-10000*zoomR;
+        var maxX = cenX+10000*zoomR;
+        var minY;    
+        var calR;
+        var maxY;  
+        
+
+        var drag = false;
+        var oldx, oldy;
+        var dx = 0, dy = 0;
+        var mx,my;               
+
+
+        var helpOn = true;
+
+        var admxy = new Map();
+
+        var thisyear = new Array();
+            //= [2001.0, 2002.0, 2003.0, 2004.0, 2005.0, 2006.0, 2007.0, 2008.0, 2009.0, 2010.0,
+            //2011.0, 2012.0, 2013.0, 2014.0, 2015.0, 2016.0, 2017.0 ,2018.0, 2019.0, 2020.0];
+        var yearIndex = 0;
+        var drawRatio = 1.0;
+        var countThreshold = 100;
+        var sggOn = true;
+        var onlyNearOn = 0;
+        
+
+        function main() {
+
+            calR = (maxX - minX) / scrW;
+            maxY = cenY +(scrH *calR/2);
+            minY = cenY -(scrH *calR/2);            
+            whRatio = scrW / scrH ; 
+
+            canvas = document.getElementById("glcanvas");
+            textCanvas = document.getElementById("text");
+            
+
+            gl = initWebGL(canvas);      // Initialize the GL context
+            // Only continue if WebGL is available and working
+            if (!gl) return;
+
+            console.log(gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE));
+
+
+            recalculateMaxY();
+            
+           
+            shaderPopu = new ShaderVars();            
+            shaderPopu.shader = getShader("popumoveVertex", "popumoveFragment");
+            shaderPopu.setUniformLoc();             
+            boPopu= new BufferObject(); 
+            setPopuData();              
+            
+            
+
+
+            //subway station shader
+            shaderSigungu = new ShaderVars();            
+            shaderSigungu.shader = getShader("mapBorderVertex", "mapBorderFragment");            
+            shaderSigungu.setUniformLoc();       
+            boSigungu = new BufferObject();      
+            setSigunguDataToBuffer();
+
+        
+            shaderSido = new ShaderVars();            
+            shaderSido.shader = getShader("mapBorderVertex", "mapBorderFragment");
+            shaderSido.setUniformLoc();             
+            boSido = new BufferObject();          
+            setSidoDataToBuffer();
+            
+            
+            
+            resize(gl.canvas);
+            
+            //알아서 주사율 맞춰서 조정
+
+            textCanvas.addEventListener("mousedown", mouseDown, false);
+            textCanvas.addEventListener("mouseup", mouseUp, false);            
+            textCanvas.addEventListener("mousemove", mouseMove, false);           
+            textCanvas.addEventListener("wheel", mouseWheel, false);     
+
+            //http://bencentra.com/code/2014/12/05/html5-canvas-touch-events.html
+            // Set up touch events for mobile, etc
+            //textCanvas.addEventListener("touchstart", touchStart, false);
+            //textCanvas.addEventListener("touchend", mouseUp, false);            
+            //textCanvas.addEventListener("touchmove", mouseMove, false);           
+           
+/*
+            // Prevent scrolling when touching the canvas
+            document.body.addEventListener("touchstart", function (e) {
+                if (e.target == textCanvas) {
+                    e.preventDefault();
+                }
+            }, false);
+            document.body.addEventListener("touchend", function (e) {
+                if (e.target == textCanvas) {
+                    e.preventDefault();
+                }
+            }, false);
+            document.body.addEventListener("touchmove", function (e) {
+                if (e.target == textCanvas) {
+                    e.preventDefault();
+                }
+            }, false);
+*/
+
+
+            window.addEventListener('keydown', keydown);
+                
+            requestAnimationFrame(render);
+
+        }
+
+
+        function render() {
+
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);      // Clear the color as well as the depth buffer.
+
+            resize(gl.canvas);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            recalculateMaxY();            
+            
+            var groundx = 0.0;
+            var groundy = 0.0;
+            if (onlyNearOn==1) {
+
+            }
+
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            gl.useProgram(shaderSigungu.shader);
+            gl.uniform4f(shaderSigungu.translation, cenX, cenY, maxX-minX, whRatio );   
+            gl.uniform4f(shaderSigungu.color, 0.3, 0.3, 0.3, 0.9 ); 
+            gl.bindBuffer(gl.ARRAY_BUFFER, boSigungu.vbo);  
+            gl.vertexAttribPointer(shaderSigungu.posAttrLoc, 2, gl.FLOAT, false, 0, 0);   
+            gl.drawArrays(gl.LINES, 0, boSigungu.numObj);
+
+            //gl.lineWidth(50);
+            gl.useProgram(shaderSido.shader);
+            gl.uniform4f(shaderSido.translation, cenX, cenY, maxX-minX, whRatio );  
+            gl.uniform4f(shaderSido.color, 1, 1, 1, 0.9 );  
+            gl.bindBuffer(gl.ARRAY_BUFFER, boSido.vbo);
+            gl.vertexAttribPointer(shaderSido.posAttrLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.LINES, 0, boSido.numObj);
+
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+            gl.useProgram(shaderPopu.shader);
+            gl.uniform4f(shaderPopu.translation, cenX, cenY, maxX-minX, whRatio );  
+            gl.uniform1f(shaderPopu.drawRatio, drawRatio );  
+            gl.uniform1i(shaderPopu.countThreshold, countThreshold);  
+            gl.uniform1i(shaderPopu.onlyNearOn, onlyNearOn);  
+            gl.uniform2f(shaderPopu.groundxy, mx, my);  
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, boPopu.vbo);
+            gl.vertexAttribPointer(shaderPopu.posAttrLoc, 4, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribPointer(shaderPopu.cntAttrLoc, 1, gl.FLOAT, false, 0, 3 * 4*4* boPopu.numObj);
+            gl.vertexAttribPointer(shaderPopu.scoreAttrLoc, 1, gl.FLOAT, false, 0, 3 * 4*5* boPopu.numObj); 
+            gl.vertexAttribPointer(shaderPopu.indexAttrLoc, 1, gl.FLOAT, false, 0, 3 * 4*6* boPopu.numObj);
+
+            for (var i=0 ; i<63 ; i++) {
+                gl.uniform1i(shaderPopu.tidx, i); 
+                gl.drawArrays(gl.TRIANGLES, thisyear[yearIndex], thisyear[yearIndex+1] - thisyear[yearIndex]);//boPopu.numObj);
+            }
+            
+
+
+
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);    
+
+            if (helpOn) {
+
+                ctx.textAlign = 'center';
+
+                ctx.textBaseline = "top";
+
+                
+                ctx.font = "bold 20px '맑은 고딕'";        
+                ctx.fillStyle = "rgba(200,200,200,1)";
+                ctx.fillText("시군구간 인구 순이동 ver 0.9", scrW/2,scrH-40);
+
+                ctx.font = "bold 80px '맑은 고딕'";  
+                ctx.fillStyle = "rgba(255,255,255,1)";
+                ctx.fillText((yearIndex+2001)+"년", scrW/2,20);
+
+                ctx.font = "25px '맑은 고딕'";  
+                ctx.fillStyle = "rgba(200,200,200,1)";
+                ctx.fillText(countThreshold+"명 이상 순이동만 표현", scrW/2,100);
+
+                if (onlyNearOn==1) {
+                    ctx.font = "25px '맑은 고딕'";  
+                    ctx.fillStyle = "rgba(200,200,200,1)";
+                    ctx.fillText("마우스 주변 시군구만 표현", scrW/2,130);
+                } 
+
+
+                ctx.textBaseline = "bottom";
+                ctx.textAlign = 'left';
+                var topH = 310;
+
+                ctx.font = "15px '맑은 고딕'";
+                ctx.fillStyle = "rgba(255,255,255,1)";
+                ctx.fillText("*. 휴대폰 조작은 구현되어 있지 않습니다. pc로 접속해주세요",15, scrH-topH); 
+
+                ctx.font = "15px '맑은 고딕'";
+                ctx.fillStyle = "rgba(200,200,200,1)";
+                ctx.fillText("*. 키보드 h 키를 눌러서 아래 설명을 숨길 수 있습니다.",15, scrH-topH+20); 
+
+                ctx.font = "15px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("*. 통계청 마이크로데이터 인구이동 데이터를 사용하여 연도별로 시군구간 순이동을 계산하였습니다." ,15, scrH-topH+40); 
+
+                ctx.font = "15px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("*. 순이동 중 40세 미만이 우세하면 푸른색으로, 40세 이상이 우세하면 붉은색 화살표로 표시하였습니다." ,15, scrH-topH+60);
+
+
+                ctx.font = "20px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("마우스 휠 / 왼쪽버튼 : zoom & pan",15, scrH-topH+120); 
+
+                ctx.font = "20px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("z/x : 기준연도 변경" ,15, scrH-topH+150); 
+
+                ctx.font = "20px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("↑ ↓ : 순이동 제한선 변경" ,15, scrH-topH+180); 
+
+                ctx.font = "20px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("← → : 이동선 길이 변경" ,15, scrH-topH+210); 
+
+                ctx.font = "20px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("c : 시군구 이름 on/off" ,15, scrH-topH+240); 
+
+                ctx.font = "20px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("v : 마우스 주변 이동만 보기 on/off" ,15, scrH-topH+270); 
+
+
+                ctx.font = "17px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("https://www.vw-lab.com/" ,15, scrH-topH+300); 
+
+
+            }
+            else {
+
+                ctx.textAlign = 'center';
+                ctx.textBaseline = "top";
+
+                ctx.font = "bold 80px '맑은 고딕'";  
+                ctx.fillStyle = "rgba(255,255,255,1)";
+                ctx.fillText((yearIndex+2001)+"년", scrW/2,20);
+
+                ctx.font = "25px '맑은 고딕'";  
+                ctx.fillStyle = "rgba(200,200,200,1)";
+                ctx.fillText(countThreshold+"명 이상 순이동만 표현", scrW/2,100);
+
+                if (onlyNearOn==1) {
+                    ctx.font = "25px '맑은 고딕'";  
+                    ctx.fillStyle = "rgba(200,200,200,1)";
+                    ctx.fillText("마우스 주변 시군구만 표현", scrW/2,130);
+                } 
+
+                ctx.textBaseline = "bottom";
+                ctx.textAlign = 'left';
+                ctx.font = "15px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,200,10,1)";
+                ctx.fillText("'h' key : 도움말",15, scrH-20); 
+
+            
+            }
+        
+            if (sggOn) {
+                ctx.textAlign = 'center';
+                ctx.textBaseline = "middle";
+                ctx.font = (30/Math.sqrt(zoomR))+"px '맑은 고딕'";        
+                ctx.fillStyle = "rgba(110,100,80,0.7)";
+
+                for (var i=0 ; i<sggCoord.length ; i++ ) {
+                    if (sggCoord[i][4]==1)
+                        ctx.fillText(sggCoord[i][3],
+                            (sggCoord[i][1]-cenX)/(maxX-minX)*(scrW/2)+(scrW/2),
+                            (sggCoord[i][2]-cenY)/(maxX-minX)*(scrH/2*whRatio)*-1+scrH/2);
+
+                }
+            }
+            //requestAnimationFrame(render);
+        }
+
+
+
+
+        function setSigunguDataToBuffer() {
+
+            var pos = new Array();
+
+            for (var i=0 ; i < sigungu.features.length ; i++) {
+
+                var coordArray = sigungu.features[i]["geometry"]["coordinates"];
+
+                for (var j=0 ; j < coordArray.length-1 ; j++) {
+                    
+                    var coord0 = coordArray[j];
+                    var coord1 = coordArray[j+1];
+                    
+                    pos.push(coord0[0]);
+                    pos.push(coord0[1]);
+                    pos.push(coord1[0]);
+                    pos.push(coord1[1]);
+                }
+
+            }            
+
+            boSigungu.numObj = pos.length / 2;
+
+            boSigungu.vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, boSigungu.vbo);
+
+            gl.bufferData(gl.ARRAY_BUFFER, 4*2*boSigungu.numObj , gl.STATIC_DRAW);
+            gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(pos));
+
+            shaderSigungu.posAttrLoc = gl.getAttribLocation(shaderSigungu.shader, "pos");                   
+            gl.enableVertexAttribArray(shaderSigungu.posAttrLoc);    
+           
+            
+
+        }
+
+        function setSidoDataToBuffer() {
+
+            var pos = new Array();
+
+            for (var i=0 ; i < sido.features.length ; i++) {
+
+                var coordArray = sido.features[i]["geometry"]["coordinates"];
+
+                for (var j=0 ; j < coordArray.length-1 ; j++) {
+                    
+                    var coord0 = coordArray[j];
+                    var coord1 = coordArray[j+1];
+                    
+                    pos.push(coord0[0]);
+                    pos.push(coord0[1]);
+                    pos.push(coord1[0]);
+                    pos.push(coord1[1]);
+                }
+
+            }            
+
+            boSido.numObj = pos.length / 2;
+
+            boSido.vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, boSido.vbo);
+
+            gl.bufferData(gl.ARRAY_BUFFER, 4*2*boSido.numObj , gl.STATIC_DRAW);
+            gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(pos));
+
+            shaderSido.posAttrLoc = gl.getAttribLocation(shaderSido.shader, "pos");      
+            gl.enableVertexAttribArray(shaderSido.posAttrLoc);   
+           
+            
+
+        }
+      
+        function initWebGL(canvas) {
+            gl = null;
+
+            try {
+                // Try to grab the standard context. If it fails, fallback to experimental.
+                gl = canvas.getContext("webgl")|| canvas.getContext("experimental-webgl");
+            }
+            catch (e) { }
+
+            // If we don't have a GL context, give up now
+            if (!gl) {
+                alert("Unable to initialize WebGL. Your browser may not support it.");
+                gl = null;
+            }
+
+
+            resize(gl.canvas);
+            gl.viewport(0, 0, scrW, scrH);
+            gl.clearColor(0.0, 0.0, 0.0, 1.0); 
+            gl.enable(gl.DEPTH_TEST);  
+            gl.depthFunc(gl.LEQUAL); 
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.getExtension('OES_standard_derivatives');
+
+            //console.log(gl.getParameter(gl.SAMPLE_COVERAGE_VALUE));  // 0.5
+            //console.log(gl.getParameter(gl.SAMPLE_COVERAGE_INVERT)); // false
+            //gl.enable(gl.SAMPLE_COVERAGE);
+            //gl.sampleCoverage(1, false);
+            
+            
+            //gl.getExtension('OES_element_index_uint');
+            return gl;
+        }
+
+        function getShader(vertexName, fragmentName) {
+
+            var vertexShaderSource = document.getElementById(vertexName).text;
+            var fragmentShaderSource = document.getElementById(fragmentName).text;
+
+            var vertexShader = gl.createShader(gl.VERTEX_SHADER);
+            var fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+
+            gl.shaderSource(vertexShader, vertexShaderSource);
+            gl.shaderSource(fragmentShader, fragmentShaderSource);
+
+            gl.compileShader(vertexShader);
+            gl.compileShader(fragmentShader);
+
+            if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+                alert("Error compiling vertex shader : " + gl.getShaderInfoLog(vertexShader));                    
+                gl.deleteShader(vertexShader);
+                return null;
+            }
+
+            if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+                alert("Error compiling fragment shader : " + gl.getShaderInfoLog(fragmentShader));                    
+                gl.deleteShader(fragmentShader);
+                return null;
+            }
+
+            var shaderProgram = gl.createProgram();
+
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+
+            gl.linkProgram(shaderProgram);
+
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                alert("Failed to link shaders");                   
+                gl.deleteProgram(shaderProgram);
+                return null;
+            }
+            return shaderProgram;
+        }
+
+
+        function setPopuData() {
+
+            //시군구 코드를 map에 넣는다.
+            for (var i=0 ; i < sggCoord.length ; i++) {
+
+                var sl = sggCoord[i];
+                admxy.set(sl[0], [sl[1], sl[2]]);
+            }
+
+            //console.log(admxy.get(11200)[0]);
+
+            var pos = new Array(popuRaw.length * 4 * 3);
+            var year = new Array(popuRaw.length * 3);
+            var cnt = new Array(popuRaw.length* 3);
+            var score = new Array(popuRaw.length* 3);
+            var triangleIndex = new Array(popuRaw.length * 3);
+            var idx = [0.0, 1.0, 2.0];
+            var yearCheck = -1;
+
+            for (var i=0 ; i<popuRaw.length ; i++) {
+
+                var sl = popuRaw[i];
+                var ori = admxy.get(sl[1]);
+                var des = admxy.get(sl[2]);
+                if (yearCheck != sl[0]) {
+                    thisyear.push(i*3);
+                    yearCheck = sl[0];
+                }
+
+                for (var j=0 ; j<3 ; j++) {
+                    pos[(i * 3 + j) * 4 + 0] = ori[0];
+                    pos[(i * 3 + j) * 4 + 1] = ori[1];
+                    pos[(i * 3 + j) * 4 + 2] = des[0];
+                    pos[(i * 3 + j) * 4 + 3] = des[1];
+
+                    year[i * 3 + j] = sl[0]+2000.0; //연도
+                    cnt[i * 3 + j] = sl[3];
+                    score[i * 3 + j] = sl[4];
+                    triangleIndex[i * 3 + j] = idx[j];
+                }
+            }
+            thisyear.push(popuRaw.length*3);
+
+            boPopu.numObj = popuRaw.length*3;
+            boPopu.vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, boPopu.vbo);
+
+            gl.bufferData(gl.ARRAY_BUFFER, 3* 4 *7*boPopu.numObj , gl.STATIC_DRAW);
+            gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(pos));
+            gl.bufferSubData(gl.ARRAY_BUFFER, 3 * 4*4* boPopu.numObj, new Float32Array(cnt));
+            gl.bufferSubData(gl.ARRAY_BUFFER, 3 * 4*5* boPopu.numObj, new Float32Array(score));
+            gl.bufferSubData(gl.ARRAY_BUFFER, 3 * 4*6* boPopu.numObj, new Float32Array(triangleIndex));
+
+            shaderPopu.posAttrLoc = gl.getAttribLocation(shaderPopu.shader, "pos"); 
+            shaderPopu.cntAttrLoc = gl.getAttribLocation(shaderPopu.shader, "cnt"); 
+            shaderPopu.scoreAttrLoc = gl.getAttribLocation(shaderPopu.shader, "score"); 
+            shaderPopu.indexAttrLoc = gl.getAttribLocation(shaderPopu.shader, "index");            
+
+
+            gl.enableVertexAttribArray(shaderPopu.posAttrLoc);   
+            gl.enableVertexAttribArray(shaderPopu.cntAttrLoc);   
+            gl.enableVertexAttribArray(shaderPopu.scoreAttrLoc);  
+            gl.enableVertexAttribArray(shaderPopu.indexAttrLoc);  
+
+
+     
+        }
+
+        function resize(canvas) {
+            // 브라우저에서 canvas가 표시되는 크기 탐색
+            var displayWidth = canvas.clientWidth;
+            var displayHeight = canvas.clientHeight;
+
+            // canvas가 같은 크기가 아닐 때 확인
+            if (canvas.width != displayWidth ||
+                canvas.height != displayHeight) {
+
+                // canvas를 동일한 크기로 수정
+                canvas.width = displayWidth;
+                canvas.height = displayHeight;
+                textCanvas.width = displayWidth;
+                textCanvas.height = displayHeight;
+            }
+            ctx = textCanvas.getContext("2d");
+            ctxgl = canvas.getContext("2d");
+            
+
+            
+        }
+
+        function recalculateMaxY() {
+
+            scrW = canvas.width;
+            scrH = canvas.height;
+            minX = cenX-10000*zoomR;
+            maxX = cenX+10000*zoomR;
+            calR = (maxX - minX) / scrW;
+            maxY = cenY +(scrH *calR/2);
+            minY = cenY -(scrH *calR/2);            
+            whRatio = scrW / scrH ;            
+            //console.log(scrW+","+scrH+","+cenX+","+cenY+","+calR+","+whRatio);
+        }
+
+        
+        //justmove
+        function mouseMove(e) {
+            
+            if (drag) { // 드래그하면 화면 이동
+                //console.log("mousedrag");
+                //console.log(e.pageX+","+e.pageY);
+                dx = (e.pageX - oldx)*calR*2;
+                dy = (e.pageY - oldy)*calR*2;
+                cenX = cenX - dx;
+                cenY = cenY + dy;               
+                //console.log(dx*calR +","+dy*calR);
+                oldx = e.pageX, oldy = e.pageY;
+                e.preventDefault();
+            } else {  //그냥 움직일때는 최단경로 찾는다
+                //console.log("mousemove");
+                recalculateMaxY();
+                mx = (e.pageX-scrW/2)/(scrW/2)*(maxX-minX)+cenX;
+                my = -(e.pageY-scrH/2)/(scrH/2)/whRatio*(maxX-minX)+cenY;
+                console.log(mx+","+my);               
+            }
+            requestAnimationFrame(render);
+            //console.log(e.pageX +"." + e.pageY);
+            //console.log(1);
+            //console.log(cenX +"." +cenY);
+        }
+
+
+
+        function mouseDown(e) {
+            
+            if (e.button==0) {  //휠클릭
+                //console.log("mouseDown");
+                drag = true;
+                oldx = e.pageX, oldy = e.pageY;
+            } else if (e.button==0) {  //왼쪽 클릭
+               
+            }
+           
+            e.preventDefault();
+            requestAnimationFrame(render);
+            return false;
+        }
+
+        function mouseUp(e) {
+            drag = false;           
+            requestAnimationFrame(render);
+        }
+
+        function mouseWheel(e) {
+
+            var zoomRCheck = zoomR * ( e.deltaY>0? 1+0.3*e.deltaY/100 : 1+0.2307692*e.deltaY/100);
+            if (zoomRCheck < 0.1 || zoomRCheck > 35.0) return;               
+           
+            zoomR = zoomRCheck;
+            cenX -= e.deltaY>0? (maxX-minX)*(e.pageX-scrW/2)/(scrW/2)*0.3*e.deltaY/100
+                                : (maxX-minX)*(e.pageX-scrW/2)/(scrW/2)*0.2307692*e.deltaY/100;
+            cenY += e.deltaY>0? (maxX-minX)/whRatio*(e.pageY-scrH/2)/(scrH/2)*0.3*e.deltaY/100
+                                : (maxX-minX)/whRatio*(e.pageY-scrH/2)/(scrH/2)*0.2307692*e.deltaY/100;     
+           
+            //console.log(e.deltaX+","+e.deltaY);
+            requestAnimationFrame(render);
+        }
+        
+        function touchStart(e) {
+            //console.log("mouseDown");
+            drag = true;
+            oldx = e.pageX, oldy = e.pageY;
+            e.preventDefault();
+            requestAnimationFrame(render);
+            return false;
+        }
+        function keydown(e) {
+
+            //console.log("keyCode :"+e.keyCode);
+            switch(e.keyCode) {
+
+            case 37: //left arrow
+                                        
+                drawRatio -= 0.05;
+                if (drawRatio<0.0) drawRatio = 0.0;
+
+                break;
+            case 39: //right arrow
+                drawRatio += 0.05;
+                if (drawRatio>1.0) drawRatio = 1.0;            
+ 
+                break;
+
+            case 38: //up arrow
+                                        
+                countThreshold++;
+                if (countThreshold>1000) countThreshold = 1000;
+
+                break;
+            case 40: //down arrow
+                countThreshold--;
+                if (countThreshold<0) countThreshold = 0;            
+ 
+                break;
+
+            case 88: //+
+                yearIndex++;
+                if (yearIndex==20) yearIndex = 0;
+                //console.log( (yearIndex+2001));
+                break;
+
+            case 90: //-
+                yearIndex--;
+                if (yearIndex==-1) yearIndex = 19;        
+                //console.log( (yearIndex+2001));
+                break;
+            case 67: //c
+                sggOn = !sggOn;                
+                break;
+            case 86: //reset
+                if (onlyNearOn==0)  onlyNearOn=1;     
+                else onlyNearOn=0;
+                break;
+            case 72: //help
+                    helpOn = !helpOn;
+                break;
+            }
+            requestAnimationFrame(render);
+            e.preventDefault();
+
+        }
+
+       
+        
+
+        function normalize(ox,oy, x,y) {
+
+            var dist = Math.sqrt( (x-ox) *(x-ox) + (y-oy)*(y-oy) );
+            return  [(x-ox) /dist , (y-oy)/dist];
+
+        }
+
+        function normalize0(v) {
+
+            var len = Math.sqrt( v[0] *v[0] + v[1]*v[1] );
+            return  [v[0] /len , v[1]/len];
+
+        }
+
+        function len(v) {
+            return Math.sqrt( v[0] *v[0] + v[1]*v[1] );
+        }
+
+        function rotate(normal, degree) {
+            var theta = Math.PI * (degree/180.0);
+            var sinT = Math.sin(theta);
+            var cosT = Math.cos(theta);
+            return [normal[0]*cosT-normal[1]*sinT, normal[0]*sinT+normal[1]*cosT]; 
+        }
+
+        function dotVectors(v1, v2) {
+            return (v1[0]*v2[0] + v1[1]*v2[1]);
+        }
+
+
+    </script>
+
+
+    <script id="popumoveVertex" type="notjs">
+        
+        #define M_PI 3.14159265358979323846
+        precision highp float;
+
+        attribute vec4 pos;
+        attribute float cnt;
+        attribute float score;
+        attribute float index;
+
+        uniform int tidx;
+        uniform vec4 trans;
+        uniform float drawRatio;
+        uniform int countThreshold;
+        uniform int onlyNearOn;
+        uniform vec2 groundxy;
+
+        varying vec4 color;
+        varying vec2 texValue;
+        varying float isDiscard;
+
+        float lineWidth = 1000.0;
+        float drawMargin = 1000.0;
+        float splitPoints = 30.0;
+
+        vec2 rotate(vec2 a, float t) {
+
+            float cost = cos(t);
+            float sint = sin(t);
+            float x = cost*a.x-sint*a.y;
+            float y = sint*a.x+cost*a.y;
+            return vec2(x,y); 
+        }
+
+
+        float getAngle(vec2 a, vec2 b) {
+
+            float under = (length(a) * length(b));
+            float acosT = acos(dot(a, b) / under);
+            float upper = a.x*b.y - a.y*b.x;
+            float asinT = asin(upper / under);
+            if (asinT > 0.0) acosT = M_PI * 2.0 - acosT;
+            if (acosT != acosT)
+            {
+                if (dot(a, b) > 0.0) return 0.0;
+                else return M_PI;
+            }
+            return acosT;
+        }
+
+        vec2 calculatePL(vec2 v12, float angle1, float width, float t, float endPoint) {
+
+
+            float powv = (onlyNearOn==1)? 1.0 : 5.0;
+            float widthMore = (onlyNearOn==1)? 300.0 : 0.0;
+            vec2 p0l = rotate(v12,angle1/2.0)* (width+widthMore) * pow(t/endPoint,powv);
+
+            return p0l;
+
+        }
+
+        vec4 middleColorBlue = vec4(0.0 / 255.0, 116.0 / 255.0, 231.0 / 255.0, 1.0);
+        vec4 middleColorRed = vec4(239.0 / 255.0, 0.0 / 255.0, 105.0 / 255.0, 1.0);
+        vec4 middleColorMiddle = vec4(43.0 / 255.0, 26.0 / 255.0, 27.0 / 255.0, 1.0);
+        float pow_ = 0.1;
+
+        void main() {           
+            
+            //색상 결정
+            vec4 colorOri, colorDes;          
+            if (score<0.0) { //score가 음수면, 출발지가 고령화되는 이동임
+		
+                float colorC = pow( abs(float(score)/27217.0), pow_);
+                colorOri =  mix(middleColorMiddle, middleColorRed, colorC);
+                colorDes =  mix(middleColorMiddle, middleColorBlue, colorC);
+            }
+            else { //score가 음수면, 도착지가 고령화되는 이동임
+                float colorC = pow( abs(float(score)/-202810.0), pow_);
+                colorOri = mix(middleColorMiddle, middleColorBlue, colorC);
+                colorDes = mix(middleColorMiddle, middleColorRed, colorC);        
+            }
+
+
+            
+
+            vec2 posf;
+
+            //인덱스에 따라 순번 부여
+            //if (index==0.0) posf = pos.xy  + vec2(float(tidx)*100.0,0.0);
+            //else if (index==1.0) posf = pos.zw;
+            //else posf = pos.zw + vec2(cnt+float(tidx*10),0.0);
+
+            vec2 ori = pos.xy;	
+            vec2 des = pos.zw;
+            
+            if (onlyNearOn==1) {
+                isDiscard = 
+                    (distance(ori, groundxy)<2000.0 ||
+                     distance(des, groundxy)<2000.0) && 
+                     cnt>=float(countThreshold)?
+                     1.0 : -1.0;
+            } else {
+                isDiscard = cnt>=float(countThreshold)? 1.0 : -1.0;
+            }
+            
+
+
+            vec2 oridesNormal = normalize(des-ori);
+            float distOriDes = distance(ori, des);
+            
+            float radFrom = (M_PI / 180.0) * 45.0;  //150
+            float radTo = (M_PI / 180.0) * 315.0;   //270
+            float scaled = 4.0;
+            vec2 ori_ = rotate(des.xy-ori.xy, radFrom)/scaled + ori.xy;
+            vec2 des_ = rotate(ori.xy-des.xy, radTo)/scaled + des.xy;
+            vec2 cc = 3.0 * (ori_ - ori);
+            vec2 bb = 3.0 * (des_ - ori_) - cc;
+            vec2 aa = des - ori - cc - bb;
+            float t, tSquared, tCubed;
+            
+            
+            //float drawLimitPoint = drawRatio;
+            float drawLimitPoint = drawRatio - drawMargin /distOriDes;
+            float endPoint;
+            float startPoint;
+
+            float value = sqrt(cnt / 14518.0); //나중에 곱하는 수치가 두께
+            float width = value * lineWidth; //나중에 곱하는 수치가 두께
+
+            startPoint = 0.0;
+			endPoint =  drawLimitPoint - 2.0* width /distOriDes;
+			float dt = (endPoint-startPoint)/ splitPoints;
+            float endPoint5pow = pow(endPoint,5.0);
+     
+            vec2 p_1, p0, p1, p2;
+            vec2 v10, v12;
+            
+
+            if (tidx >= 58 && tidx <=62) { //맨 끝 화살표부분
+
+                t = startPoint + float(56/2) * dt; 
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p0 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+
+                t +=dt;  //58을 중심으로.
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+                        
+
+                t += dt; //endpoint 보다 dt만큼 더 나간 점이다.
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                //p2는 그리지 않았으나, 한 단계 앞의 점임
+                p2 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+
+                    
+                v10 = normalize(p0-p1);
+                v12 = normalize(p2-p1);
+                float angle1 =getAngle(v12,v10); //두 직선이 이루는 각
+
+                vec2 p0l = calculatePL(v12, angle1, width, t, endPoint);        
+                vec2 p0lf = p1 +p0l;
+                vec2 p0rf = p1 -p0l;
+                color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint) ,1.0);
+
+                t = drawLimitPoint;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                vec2 pf = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+
+                vec2 arrowNormal = normalize(pf-p1); //pf는 최종 도달점. p1은 endpoint 점
+                vec2 arrow = pf;
+
+                //오목하게 들어간 부분
+                vec2 p0larrow =	p1+ arrowNormal * width * 0.9 +0.3*p0l ;
+                vec2 p0rarrow = p1+ arrowNormal * width * 0.9 -0.3*p0l ;
+                
+                //날개 끝
+                vec2 p0larrow2 = p1+ arrowNormal * width * 0.2 +p0l*1.1;
+                vec2 p0rarrow2 = p1+ arrowNormal * width * 0.2 -p0l*1.1;
+
+                	
+                texValue =  vec2(11.0,0);
+                vec2 position;
+
+                if (tidx==58) {
+                    if (index==0.0) position = (p0lf-trans.xy)/trans.z ;
+                    else if (index==1.0) position = (p0rf-trans.xy)/trans.z ; 
+                    else position = (p0larrow-trans.xy)/trans.z ;  
+
+                } else if (tidx==59) {
+                    if (index==0.0) position = (p0rf-trans.xy)/trans.z ;
+                    else if (index==1.0) position = (p0larrow-trans.xy)/trans.z ; 
+                    else position = (p0rarrow-trans.xy)/trans.z ;  
+
+                }  else if (tidx==60) {
+                    if (index==0.0) position = (p0larrow-trans.xy)/trans.z ;
+                    else if (index==1.0) position = (p0rarrow-trans.xy)/trans.z ; 
+                    else position = (arrow-trans.xy)/trans.z ;  
+
+                }  else if (tidx==61) {
+                    if (index==0.0) position = (p0rarrow-trans.xy)/trans.z ;
+                    else if (index==1.0) position = (arrow-trans.xy)/trans.z ; 
+                    else position = (p0rarrow2-trans.xy)/trans.z ;  
+
+                }  else if (tidx==62) {
+                    if (index==0.0) position = (arrow-trans.xy)/trans.z ;
+                    else if (index==1.0) position = (p0larrow2-trans.xy)/trans.z ; 
+                    else position = (p0larrow-trans.xy)/trans.z ;  
+                } 
+
+                gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);  
+
+            } else if (tidx== 0) { //각도때문에 첫 점은 특별하게
+
+                //0번 점
+                t = startPoint;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p0 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+        
+                //1번 점
+                t+=dt;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+                vec2 p0p1 = p1-p0;
+                vec2 p0p1Norm = normalize(p0p1);
+
+                vec2 p0l = t* width * rotate(p0p1Norm, M_PI/2.0);  
+
+                vec2 p0lf = p0 +p0l ;
+                vec2 p0rf = p0 -p0l ;
+
+                if (index==0.0) {
+                    texValue =  vec2(11.0,0);
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+								,1.0);
+                    vec2 position = (p0lf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);   
+                } else if (index==1.0) {
+                    texValue =  vec2(11.0,0);
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+								,1.0);
+                    vec2 position = (p0rf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);   
+                } else {
+
+                    t+=dt;
+                    tSquared = t * t;
+                    tCubed = tSquared * t;
+                    p2 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+            
+                    v10 = normalize(p0-p1);
+                    v12 = normalize(p2-p1);
+                    float angle1 =getAngle(v12,v10); //두 직선이 이루는 각
+
+                    p0l = calculatePL(v12, angle1, width, t, endPoint);       
+                
+                    p0lf = p1 +p0l ;
+                    //p0rf = p1 -p0l ;
+
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+                            ,1.0);
+                    texValue =  vec2(11.0,0);
+                    vec2 position = (p0lf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);  
+                }
+            
+
+
+
+
+            } else if (tidx==1) { //각도때문에 두번째  점도 특별하게
+                
+                //0번 점
+                t = startPoint;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p0 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+        
+                //1번 점
+                t+=dt;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+                vec2 p0p1 = p1-p0;
+                vec2 p0p1Norm = normalize(p0p1);
+
+                vec2 p0l = t* width * rotate(p0p1Norm, M_PI/2.0);  
+
+                vec2 p0lf = p0 +p0l ;
+                vec2 p0rf = p0 -p0l ;
+
+                if (index==0.0) {
+                    texValue =  vec2(11.0,0);
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+								,1.0);
+                    vec2 position = (p0rf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);   
+                    
+                } else {
+
+                    t+=dt;
+                    tSquared = t * t;
+                    tCubed = tSquared * t;
+                    p2 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+            
+                    v10 = normalize(p0-p1);
+                    v12 = normalize(p2-p1);
+                    float angle1 =getAngle(v12,v10); //두 직선이 이루는 각
+
+                    p0l = calculatePL(v12, angle1, width, t, endPoint);        
+                
+                    p0lf = p1 +p0l ;
+                    p0rf = p1 -p0l ;
+
+                    vec2 position = index==1.0? (p0lf-trans.xy)/trans.z : (p0rf-trans.xy)/trans.z;
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+                            ,1.0);
+                    texValue =  vec2(11.0,0);
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);  
+                    
+                }
+                
+                
+            } else if (tidx== int(tidx/2)*2) { //2,4,6...
+
+                //-1번 점
+                t = startPoint + float((tidx-2)/2) * dt;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p_1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+
+                //0번 점
+                t+=dt;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p0 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+        
+                //1번 점
+                t+=dt;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+                v10 = normalize(p_1-p0);
+                v12 = normalize(p1-p0);
+                float angle1 =getAngle(v12,v10); //두 직선이 이루는 각
+                vec2 p0l = calculatePL(v12, angle1, width, t, endPoint);   
+
+                vec2 p0lf = p0 +p0l ;
+                vec2 p0rf = p0 -p0l ;
+
+                if (index==0.0) {
+                    texValue =  vec2(11.0,0);
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+								,1.0);
+                    vec2 position = (p0lf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);   
+                } else if (index==1.0) {
+                    texValue =  vec2(11.0,0);
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+								,1.0);
+                    vec2 position = (p0rf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);   
+                } else {
+
+                    t+=dt;
+                    tSquared = t * t;
+                    tCubed = tSquared * t;
+                    p2 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+            
+                    v10 = normalize(p0-p1);
+                    v12 = normalize(p2-p1);
+                    float angle1 =getAngle(v12,v10); //두 직선이 이루는 각
+
+                    p0l =calculatePL(v12, angle1, width, t, endPoint);       
+                
+                    p0lf = p1 +p0l ;
+                    //p0rf = p1 -p0l ;
+
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+                            ,1.0);
+                    texValue =  vec2(11.0,0);
+                    vec2 position = (p0lf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);  
+                }
+            
+
+
+
+
+            } else { //3, 5, 7, ...57
+
+                //-1번 점
+                t = startPoint + float((tidx-3)/2) * dt;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p_1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+                //0번 점
+                t += dt;
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p0 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+        
+                //1번 점
+                t+=dt; //58을 중심으로
+                tSquared = t * t;
+                tCubed = tSquared * t;
+                p1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+
+                v10 = normalize(p_1-p0);
+                v12 = normalize(p1-p0);
+                float angle1 =getAngle(v12,v10); //두 직선이 이루는 각
+                vec2 p0l = calculatePL(v12, angle1, width, t, endPoint);    
+
+
+                vec2 p0lf = p0 +p0l ;
+                vec2 p0rf = p0 -p0l ;
+
+                if (index==0.0) {
+                    texValue =  vec2(11.0,0);
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+								,1.0);
+                    vec2 position = (p0rf-trans.xy)/trans.z ;          
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);   
+                    
+                } else {
+
+                    t+=dt;
+                    tSquared = t * t;
+                    tCubed = tSquared * t;
+                    p2 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
+            
+                    v10 = normalize(p0-p1);
+                    v12 = normalize(p2-p1);
+                    float angle1 =getAngle(v12,v10); //두 직선이 이루는 각
+
+                    p0l = calculatePL(v12, angle1, width, t, endPoint);     
+                
+                    p0lf = p1 +p0l ;
+                    p0rf = p1 -p0l ;
+
+                    vec2 position = index==1.0? (p0lf-trans.xy)/trans.z : (p0rf-trans.xy)/trans.z;
+                    color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint)
+                            ,1.0);
+                    texValue =  vec2(11.0,0);
+                    gl_Position =  vec4(position.x , position.y *trans.w, 0, 1.0);  
+                    
+                }
+               
+
+
+            }
+
+
+
+
+
+
+      
+            
+        }
+       
+
+    </script>
+
+    <script id="popumoveFragment" type="notjs">
+       
+        precision highp float;
+        varying vec4 color;
+        varying vec2 texValue;
+        varying float isDiscard;
+
+        void main() {
+
+            if (isDiscard < 0.0) {
+                discard;
+            } else if (texValue.x>10.0) {
+                gl_FragColor = vec4(color.xyz, 1.0);
+            }
+            else {
+                float dotValue = dot(texValue,texValue);
+                if (dotValue>1.0||dotValue<0.7) discard;
+                else gl_FragColor = color;
+            }
+         
+        }
+
+    </script>
+
+
+    <script id="mapBorderVertex" type="notjs">
+        
+        precision highp float;
+        attribute vec2 pos;
+
+        uniform vec4 trans;
+
+        void main() {           
+            vec2 position = (pos-trans.xy)/trans.z;          
+            gl_Position =  vec4(position.x , position.y *trans.w, 0,1.0);        
+        }
+       
+
+    </script>
+
+    <script id="mapBorderFragment" type="notjs">
+       
+        precision highp float;
+        uniform vec4 color;
+        void main() {
+            gl_FragColor = color;          
+         
+        }
+
+    </script>
+  
+</head>
+<body onload="main()">
+    <canvas id="glcanvas"></canvas>    
+    <canvas id="text"></canvas>
+</body>
+</html>
+
+
