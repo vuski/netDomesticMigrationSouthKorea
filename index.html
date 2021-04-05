@@ -48,6 +48,17 @@
             -webkit-text-fill-color: aliceblue;
         }
     </style>
+
+    <!-- Global site tag (gtag.js) - Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XG64WBEY3K"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+
+        gtag('config', 'G-XG64WBEY3K');
+    </script>
+
     <script type="text/javascript">
 
         var gl; // A global variable for the WebGL context
@@ -68,6 +79,7 @@
             var countThreshold;
             var onlyNearOn;
             var groundxy;
+            var widReducRatio;
 
            ShaderVars.prototype.setUniformLoc =  function () {
                 this.translation = gl.getUniformLocation(this.shader, "trans");                
@@ -78,6 +90,7 @@
                 this.countThreshold = gl.getUniformLocation(this.shader, "countThreshold");
                 this.onlyNearOn = gl.getUniformLocation(this.shader, "onlyNearOn");
                 this.groundxy = gl.getUniformLocation(this.shader, "groundxy");
+                this.widReducRatio = gl.getUniformLocation(this.shader, "widReducRatio");
             } 
            
             var posAttrLoc; 
@@ -142,7 +155,7 @@
         var countThreshold = 100;
         var sggOn = true;
         var onlyNearOn = 0;
-        
+        var widReducRatio = 5.0;
 
         function main() {
 
@@ -188,7 +201,7 @@
             boSido = new BufferObject();          
             setSidoDataToBuffer();
             
-            
+            //console.log("셋팅");
             
             resize(gl.canvas);
             
@@ -234,6 +247,7 @@
 
         function render() {
 
+            //console.log("렌더");
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);      // Clear the color as well as the depth buffer.
 
             resize(gl.canvas);
@@ -271,6 +285,7 @@
             gl.uniform1i(shaderPopu.countThreshold, countThreshold);  
             gl.uniform1i(shaderPopu.onlyNearOn, onlyNearOn);  
             gl.uniform2f(shaderPopu.groundxy, mx, my);  
+            gl.uniform1f(shaderPopu.widReducRatio, widReducRatio);  
 
             gl.bindBuffer(gl.ARRAY_BUFFER, boPopu.vbo);
             gl.vertexAttribPointer(shaderPopu.posAttrLoc, 4, gl.FLOAT, false, 0, 0);
@@ -316,7 +331,7 @@
 
                 ctx.textBaseline = "bottom";
                 ctx.textAlign = 'left';
-                var topH = 310;
+                var topH = 340;
 
                 ctx.font = "15px '맑은 고딕'";
                 ctx.fillStyle = "rgba(255,255,255,1)";
@@ -359,10 +374,14 @@
                 ctx.fillStyle = "rgba(150,150,150,1)";
                 ctx.fillText("v : 마우스 주변 이동만 보기 on/off" ,15, scrH-topH+270); 
 
+                ctx.font = "20px '맑은 고딕'";
+                ctx.fillStyle = "rgba(150,150,150,1)";
+                ctx.fillText("a/s : 이동선 두께 감쇄율 조정" ,15, scrH-topH+300); 
+
 
                 ctx.font = "17px '맑은 고딕'";
                 ctx.fillStyle = "rgba(150,150,150,1)";
-                ctx.fillText("https://www.vw-lab.com/" ,15, scrH-topH+300); 
+                ctx.fillText("https://www.vw-lab.com/" ,15, scrH-topH+330); 
 
 
             }
@@ -685,7 +704,7 @@
                 recalculateMaxY();
                 mx = (e.pageX-scrW/2)/(scrW/2)*(maxX-minX)+cenX;
                 my = -(e.pageY-scrH/2)/(scrH/2)/whRatio*(maxX-minX)+cenY;
-                console.log(mx+","+my);               
+                //console.log(mx+","+my);               
             }
             requestAnimationFrame(render);
             //console.log(e.pageX +"." + e.pageY);
@@ -745,12 +764,12 @@
 
             case 37: //left arrow
                                         
-                drawRatio -= 0.05;
-                if (drawRatio<0.0) drawRatio = 0.0;
+                drawRatio -= 0.01;
+                if (drawRatio<0.01) drawRatio = 0.01;
 
                 break;
             case 39: //right arrow
-                drawRatio += 0.05;
+                drawRatio += 0.01;
                 if (drawRatio>1.0) drawRatio = 1.0;            
  
                 break;
@@ -781,9 +800,18 @@
             case 67: //c
                 sggOn = !sggOn;                
                 break;
-            case 86: //reset
+            case 86: //v
                 if (onlyNearOn==0)  onlyNearOn=1;     
                 else onlyNearOn=0;
+                break;
+            case 65: //a
+                widReducRatio -= 0.5;
+                if (widReducRatio<0.5) widReducRatio = 0.5;
+                console.log("a");
+                break;
+            case 83: //s
+                widReducRatio += 0.5;
+                if (widReducRatio>20) widReducRatio = 20.0;   
                 break;
             case 72: //help
                     helpOn = !helpOn;
@@ -846,7 +874,7 @@
         uniform int countThreshold;
         uniform int onlyNearOn;
         uniform vec2 groundxy;
-
+        uniform float widReducRatio;
         varying vec4 color;
         varying vec2 texValue;
         varying float isDiscard;
@@ -883,9 +911,10 @@
         vec2 calculatePL(vec2 v12, float angle1, float width, float t, float endPoint) {
 
 
-            float powv = (onlyNearOn==1)? 1.0 : 5.0;
+            float powv = (onlyNearOn==1)? 1.0 : widReducRatio;
             float widthMore = (onlyNearOn==1)? 300.0 : 0.0;
             vec2 p0l = rotate(v12,angle1/2.0)* (width+widthMore) * pow(t/endPoint,powv);
+            p0l = p0l * (0.2 + 0.8 * drawRatio);
 
             return p0l;
 
@@ -951,18 +980,20 @@
             float t, tSquared, tCubed;
             
             
-            //float drawLimitPoint = drawRatio;
-            float drawLimitPoint = drawRatio - drawMargin /distOriDes;
+
+            float drawLimitPoint = drawRatio * (1.0 - drawMargin /distOriDes);
+           
             float endPoint;
             float startPoint;
 
-            float value = sqrt(cnt / 14518.0); //나중에 곱하는 수치가 두께
+            float value = sqrt(cnt / 14518.0); 
             float width = value * lineWidth; //나중에 곱하는 수치가 두께
 
             startPoint = 0.0;
-			endPoint =  drawLimitPoint - 2.0* width /distOriDes;
+			endPoint =  drawLimitPoint * (1.0 -  drawRatio * 2.0* width /distOriDes);
+            //if (endPoint<0.0) endPoint = 0.0;
 			float dt = (endPoint-startPoint)/ splitPoints;
-            float endPoint5pow = pow(endPoint,5.0);
+            //float endPoint5pow = pow(endPoint,5.0);
      
             vec2 p_1, p0, p1, p2;
             vec2 v10, v12;
@@ -976,7 +1007,7 @@
                 p0 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
 
 
-                t +=dt;  //58을 중심으로.
+                t += dt ;  //58을 중심으로.
                 tSquared = t * t;
                 tCubed = tSquared * t;
                 p1 = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
@@ -999,7 +1030,7 @@
                 vec2 p0rf = p1 -p0l;
                 color = vec4(mix(colorOri.xyz,colorDes.xyz,t/endPoint) ,1.0);
 
-                t = drawLimitPoint;
+                t = drawLimitPoint * (1.2 - drawRatio * 0.2);
                 tSquared = t * t;
                 tCubed = tSquared * t;
                 vec2 pf = (aa* tCubed) + (bb* tSquared) + (cc * t) + ori;
@@ -1009,12 +1040,12 @@
                 vec2 arrow = pf;
 
                 //오목하게 들어간 부분
-                vec2 p0larrow =	p1+ arrowNormal * width * 0.9 +0.3*p0l ;
-                vec2 p0rarrow = p1+ arrowNormal * width * 0.9 -0.3*p0l ;
+                vec2 p0larrow =	p1+ arrowNormal * width * drawRatio * 0.9 +0.3*p0l ;
+                vec2 p0rarrow = p1+ arrowNormal * width * drawRatio* 0.9 -0.3*p0l ;
                 
                 //날개 끝
-                vec2 p0larrow2 = p1+ arrowNormal * width * 0.2 +p0l*1.1;
-                vec2 p0rarrow2 = p1+ arrowNormal * width * 0.2 -p0l*1.1;
+                vec2 p0larrow2 = p1+ arrowNormal * drawRatio* width * 0.2 +p0l*1.1;
+                vec2 p0rarrow2 = p1+ arrowNormal * drawRatio* width * 0.2 -p0l*1.1;
 
                 	
                 texValue =  vec2(11.0,0);
