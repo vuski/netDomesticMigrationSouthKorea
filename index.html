@@ -156,6 +156,9 @@
         var sggOn = true;
         var onlyNearOn = 0;
         var widReducRatio = 5.0;
+        var popuVec;
+        var popuVecIndex =  new Array();
+        var mousex, mousey;
 
         function main() {
 
@@ -302,6 +305,89 @@
 
 
             ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);    
+
+
+            //주변만 표시할때는 숫자도 표시한다.
+            if (onlyNearOn==1) {
+
+                ctx.beginPath();
+                ctx.arc(mousex, mousey, (20/Math.sqrt(zoomR)), 0, Math.PI*2, true);
+                ctx.fillStyle = "rgba(255,255,255,0.1)"
+                ctx.fill();
+                ctx.closePath();
+
+                ctx.textAlign = 'center';
+                ctx.textBaseline = "middle";
+                ctx.font = "bold " +(30/Math.sqrt(zoomR)) + "px '맑은 고딕'";        
+                ctx.fillStyle = "rgba(200,200,200,1)";
+         
+                var radFrom = (Math.PI / 180.0) * 45.0;  //150
+                var radTo = (Math.PI / 180.0) * 315.0;   //270
+                var scaled = 4.0;
+                var drawMargin = 1000.0;
+                var splitPoints = 30.0;
+                var lineWidth = 1000.0;
+
+                for (var i=popuVecIndex[yearIndex]; i < popuVecIndex[yearIndex+1] ; i++) {
+
+                    var pv = popuVec[i];
+
+                    var orix = (mx - pv[0]);
+                    var oriy = (my - pv[1]);
+                    var desx = (mx - pv[2]);
+                    var desy = (my - pv[3]);
+
+                    var isNear = (orix*orix + oriy * oriy) < 4000000.0 || 
+                        (desx * desx + desy * desy) < 4000000.0;
+
+                    if (isNear && pv[4]>=countThreshold) { //가깝고 표출수치 이상이면
+
+                        var ori = [pv[0], pv[1]];
+                        var des = [pv[2], pv[3]];
+                        var distOriDes = Math.sqrt( (ori[0] - des[0]) * (ori[0] - des[0]) +
+                                     (ori[1] - des[1]) *  (ori[1] - des[1]));
+
+                        var oriR = rotate([des[0] - ori[0], des[1] - ori[1]], radFrom);
+                        var desR = rotate([ori[0] - des[0], ori[1] - des[1]], radTo);
+
+                        var ori_ = [oriR[0]/scaled + ori[0], oriR[1]/scaled + ori[1]];
+                        var des_ = [desR[0]/scaled + des[0], desR[1]/scaled + des[1]];
+                        var cc = [3.0 * (ori_[0] - ori[0]), 3.0 * (ori_[1] - ori[1])];
+                        var bb = [3.0 * (des_[0] - ori_[0]) - cc[0], 3.0 * (des_[1] - ori_[1]) - cc[1]];
+                        var aa = [des[0] - ori[0] - cc[0] - bb[0], des[1] - ori[1] - cc[1] - bb[1]];
+
+                        //var ori_ = rotate(des.xy-ori.xy, radFrom)/scaled + ori.xy;
+                        //var des_ = rotate(ori.xy-des.xy, radTo)/scaled + des.xy;
+                        //var cc = 3.0 * (ori_ - ori);
+                        //var bb = 3.0 * (des_ - ori_) - cc;
+                        //var aa = des - ori - cc - bb;
+
+                        var drawLimitPoint = drawRatio * (1.0 - drawMargin /distOriDes);           
+
+                        var value = Math.sqrt(pv[4] / 14518.0); 
+                        var width = value * lineWidth; //나중에 곱하는 수치가 두께
+
+                        var startPoint = 0.0;
+                        var endPoint =  drawLimitPoint * (1.0 -  drawRatio * 2.0* width /distOriDes);
+                        var dt = (endPoint-startPoint)/ splitPoints;
+
+                        var t = startPoint + 20.0 * dt;
+                        var tSquared = t * t;
+                        var tCubed = tSquared * t;
+                        var p0 = [(aa[0]* tCubed) + (bb[0]* tSquared) + (cc[0] * t) + ori[0],
+                                (aa[1]* tCubed) + (bb[1]* tSquared) + (cc[1] * t) + ori[1]];
+
+                         
+                        ctx.fillText(pv[4], 
+                            (p0[0]- cenX)/(maxX-minX)*(scrW/2)+(scrW/2),
+                            (p0[1]- cenY)/(maxX-minX)*(scrH/2*whRatio)*-1+scrH/2);
+
+
+                    }
+                }
+            }
+
+
 
             if (helpOn) {
 
@@ -592,9 +678,11 @@
             }
 
             //console.log(admxy.get(11200)[0]);
+            popuVec = new Array(popuRaw.length * 5); // cpu 계산용
+            
 
             var pos = new Array(popuRaw.length * 4 * 3);
-            var year = new Array(popuRaw.length * 3);
+            //var year = new Array(popuRaw.length * 3);
             var cnt = new Array(popuRaw.length* 3);
             var score = new Array(popuRaw.length* 3);
             var triangleIndex = new Array(popuRaw.length * 3);
@@ -608,8 +696,10 @@
                 var des = admxy.get(sl[2]);
                 if (yearCheck != sl[0]) {
                     thisyear.push(i*3);
+                    popuVecIndex.push(i); // cpu 계산용
                     yearCheck = sl[0];
                 }
+                popuVec[i] = [ori[0], ori[1], des[0], des[1], sl[3]]; // cpu 계산용
 
                 for (var j=0 ; j<3 ; j++) {
                     pos[(i * 3 + j) * 4 + 0] = ori[0];
@@ -617,13 +707,14 @@
                     pos[(i * 3 + j) * 4 + 2] = des[0];
                     pos[(i * 3 + j) * 4 + 3] = des[1];
 
-                    year[i * 3 + j] = sl[0]+2000.0; //연도
+                    //year[i * 3 + j] = sl[0]+2000.0; //연도
                     cnt[i * 3 + j] = sl[3];
                     score[i * 3 + j] = sl[4];
                     triangleIndex[i * 3 + j] = idx[j];
                 }
             }
             thisyear.push(popuRaw.length*3);
+            popuVecIndex.push(popuRaw.length); // cpu 계산용
 
             boPopu.numObj = popuRaw.length*3;
             boPopu.vbo = gl.createBuffer();
@@ -689,6 +780,9 @@
         //justmove
         function mouseMove(e) {
             
+            mousex = e.pageX;
+            mousey = e.pageY;
+
             if (drag) { // 드래그하면 화면 이동
                 //console.log("mousedrag");
                 //console.log(e.pageX+","+e.pageY);
@@ -843,8 +937,8 @@
             return Math.sqrt( v[0] *v[0] + v[1]*v[1] );
         }
 
-        function rotate(normal, degree) {
-            var theta = Math.PI * (degree/180.0);
+        function rotate(normal, theta) {
+            //var theta = Math.PI * (degree);
             var sinT = Math.sin(theta);
             var cosT = Math.cos(theta);
             return [normal[0]*cosT-normal[1]*sinT, normal[0]*sinT+normal[1]*cosT]; 
