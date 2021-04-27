@@ -39,7 +39,7 @@
             width: 100px;
             height: 100%;
             z-index: 1000;
-            background-color: rgba(0, 0, 0, 0.829);
+            background-color: rgba(0, 0, 0, 0.0);
         }
         div.main_canvas {
             
@@ -1067,11 +1067,7 @@
                         left += 'px';
                         toggleBtn.css('left', left);
                         requestAnimationFrame(render);
-                    }
-                    if (left==0 || left==65) {
-                        console.log("변경!");
-                        requestAnimationFrame(render);
-                    }
+                    }                    
                 }, 10);
             setTimeout(function(){
                 clearInterval(intervalID);
