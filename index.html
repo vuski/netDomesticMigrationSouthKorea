@@ -7,7 +7,7 @@
     <script src="sigungu.js"></script>
     <script src="admxy.js"></script>
     <script src="netpopumove.js"></script>
-    
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
  
 
     <meta name="viewport" content="width=device-width, height=device-height, user-scalable=no" />
@@ -32,6 +32,20 @@
         .container {
             position: relative;
         }
+        div.left_button {
+            position: absolute; /* Reposition logo from the natural layout */
+            left: 0px;
+            top: 0px;
+            width: 100px;
+            height: 100%;
+            z-index: 1000;
+            background-color: rgba(0, 0, 0, 0.829);
+        }
+        div.main_canvas {
+            
+            z-index: 1;
+
+        }
         /* canvas를 viewport 크기로 만들기 */
         canvas {
             width: 100vw;
@@ -47,6 +61,38 @@
             z-index: 10;
             -webkit-text-fill-color: aliceblue;
         }
+
+        .toggleBG{
+            background: #68819c;
+            width: 90px;
+            height: 30px;
+            border: 1px solid #eeeeee;
+            border-radius: 15px;
+            margin-top : 5px;
+            margin-bottom : 5px;
+        }
+        .toggleFG{
+            background: #FFFFFF;
+            top : 3px;      
+            left : 65px;     
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 12px;
+            position: relative;
+ 
+            
+        }
+        .toggleText{
+            top : -2px;          
+
+            border: none;           
+            position: relative;
+            
+        }
+
+
+
     </style>
 
     <!-- Global site tag (gtag.js) - Google Analytics -->
@@ -80,6 +126,7 @@
             var onlyNearOn;
             var groundxy;
             var widReducRatio;
+            var sidoFlag;
 
            ShaderVars.prototype.setUniformLoc =  function () {
                 this.translation = gl.getUniformLocation(this.shader, "trans");                
@@ -91,6 +138,7 @@
                 this.onlyNearOn = gl.getUniformLocation(this.shader, "onlyNearOn");
                 this.groundxy = gl.getUniformLocation(this.shader, "groundxy");
                 this.widReducRatio = gl.getUniformLocation(this.shader, "widReducRatio");
+                this.sidoFlag = gl.getUniformLocation(this.shader, "sidoFlag");
             } 
            
             var posAttrLoc; 
@@ -98,6 +146,7 @@
             var scoreAttrLoc; 
             var yearAttrLoc; 
             var indexAttrLoc; 
+            var sidoAttrLoc;
             
         }
 
@@ -247,8 +296,19 @@
 
         }
 
+        function getToggleBtnState(toggleBtnId){
+            const left_px = parseInt( $('#'+toggleBtnId).css('left') );        
+            return (left_px > 0)? 1 : 0;
+        }
 
         function render() {
+
+            var sidoFlag = 0;
+            for (var i=0 ; i<=16 ; i++) {
+                var currentButton = getToggleBtnState("sido"+ i);
+                sidoFlag += currentButton << i;
+             }
+             //console.log(sidoFlag);
 
             //console.log("렌더");
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);      // Clear the color as well as the depth buffer.
@@ -289,12 +349,14 @@
             gl.uniform1i(shaderPopu.onlyNearOn, onlyNearOn);  
             gl.uniform2f(shaderPopu.groundxy, mx, my);  
             gl.uniform1f(shaderPopu.widReducRatio, widReducRatio);  
+            gl.uniform1i(shaderPopu.sidoFlag, sidoFlag);  
 
             gl.bindBuffer(gl.ARRAY_BUFFER, boPopu.vbo);
             gl.vertexAttribPointer(shaderPopu.posAttrLoc, 4, gl.FLOAT, false, 0, 0);
             gl.vertexAttribPointer(shaderPopu.cntAttrLoc, 1, gl.FLOAT, false, 0, 3 * 4*4* boPopu.numObj);
             gl.vertexAttribPointer(shaderPopu.scoreAttrLoc, 1, gl.FLOAT, false, 0, 3 * 4*5* boPopu.numObj); 
             gl.vertexAttribPointer(shaderPopu.indexAttrLoc, 1, gl.FLOAT, false, 0, 3 * 4*6* boPopu.numObj);
+            gl.vertexAttribPointer(shaderPopu.sidoAttrLoc, 1, gl.FLOAT, false, 0, 3 * 4*7* boPopu.numObj);
 
             for (var i=0 ; i<63 ; i++) {
                 gl.uniform1i(shaderPopu.tidx, i); 
@@ -398,7 +460,8 @@
                 
                 ctx.font = "bold 20px '맑은 고딕'";        
                 ctx.fillStyle = "rgba(200,200,200,1)";
-                ctx.fillText("시군구간 인구 순이동 ver 0.9", scrW/2,scrH-40);
+                ctx.fillText("시군구간 인구 순이동 ver 1.1", scrW/2,scrH-40);
+                //2021.04.28 ver 1.1 시도 토글버튼 추가
 
                 ctx.font = "bold 80px '맑은 고딕'";  
                 ctx.fillStyle = "rgba(255,255,255,1)";
@@ -686,6 +749,30 @@
             var cnt = new Array(popuRaw.length* 3);
             var score = new Array(popuRaw.length* 3);
             var triangleIndex = new Array(popuRaw.length * 3);
+            var sidoIndex = new Array(popuRaw.length * 3);
+
+            var sidomap = new Map();
+            sidomap.set(11,0); //서울
+            sidomap.set(26,1); //부산
+            sidomap.set(27,2); //대구
+            sidomap.set(28,3); //인천
+            sidomap.set(29,4); //광주
+            sidomap.set(30,5); //대전
+            sidomap.set(31,6); //울산
+            sidomap.set(36,7); //세종
+            sidomap.set(41,8); //경기
+            sidomap.set(42,9); //강원
+            sidomap.set(43,10); //충북
+            sidomap.set(44,11); //충남
+            sidomap.set(45,12); //전북
+            sidomap.set(46,13); //전남
+            sidomap.set(47,14); //경북
+            sidomap.set(48,15); //경남
+            sidomap.set(49,16); //제주
+            sidomap.set(50,16); //제주
+
+
+
             var idx = [0.0, 1.0, 2.0];
             var yearCheck = -1;
 
@@ -694,6 +781,10 @@
                 var sl = popuRaw[i];
                 var ori = admxy.get(sl[1]);
                 var des = admxy.get(sl[2]);
+                var oriSido = sidomap.get(parseInt(sl[1]/1000));
+                var desSido = sidomap.get(parseInt(sl[2]/1000));
+                var odCode = oriSido * 100 + desSido;
+
                 if (yearCheck != sl[0]) {
                     thisyear.push(i*3);
                     popuVecIndex.push(i); // cpu 계산용
@@ -711,6 +802,7 @@
                     cnt[i * 3 + j] = sl[3];
                     score[i * 3 + j] = sl[4];
                     triangleIndex[i * 3 + j] = idx[j];
+                    sidoIndex[i * 3 + j] = odCode;
                 }
             }
             thisyear.push(popuRaw.length*3);
@@ -720,23 +812,24 @@
             boPopu.vbo = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, boPopu.vbo);
 
-            gl.bufferData(gl.ARRAY_BUFFER, 3* 4 *7*boPopu.numObj , gl.STATIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, 3* 4 *8*boPopu.numObj , gl.STATIC_DRAW);
             gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(pos));
             gl.bufferSubData(gl.ARRAY_BUFFER, 3 * 4*4* boPopu.numObj, new Float32Array(cnt));
             gl.bufferSubData(gl.ARRAY_BUFFER, 3 * 4*5* boPopu.numObj, new Float32Array(score));
             gl.bufferSubData(gl.ARRAY_BUFFER, 3 * 4*6* boPopu.numObj, new Float32Array(triangleIndex));
+            gl.bufferSubData(gl.ARRAY_BUFFER, 3 * 4*7* boPopu.numObj, new Float32Array(sidoIndex));
 
             shaderPopu.posAttrLoc = gl.getAttribLocation(shaderPopu.shader, "pos"); 
             shaderPopu.cntAttrLoc = gl.getAttribLocation(shaderPopu.shader, "cnt"); 
             shaderPopu.scoreAttrLoc = gl.getAttribLocation(shaderPopu.shader, "score"); 
             shaderPopu.indexAttrLoc = gl.getAttribLocation(shaderPopu.shader, "index");            
-
+            shaderPopu.sidoAttrLoc = gl.getAttribLocation(shaderPopu.shader, "sido");  
 
             gl.enableVertexAttribArray(shaderPopu.posAttrLoc);   
             gl.enableVertexAttribArray(shaderPopu.cntAttrLoc);   
             gl.enableVertexAttribArray(shaderPopu.scoreAttrLoc);  
             gl.enableVertexAttribArray(shaderPopu.indexAttrLoc);  
-
+            gl.enableVertexAttribArray(shaderPopu.sidoAttrLoc);  
 
      
         }
@@ -948,12 +1041,47 @@
             return (v1[0]*v2[0] + v1[1]*v2[1]);
         }
 
+        $(document).on('click', '.toggleBG', function () {
+            var toggleBG = $(this);
+            var toggleFG = $(this).find('.toggleFG');
+            var left = toggleFG.css('left');
+            if(left == '65px') {
+                toggleBG.css('background', '#333333');
+                toggleActionStart(toggleFG, 'TO_LEFT');               
+            }else if(left == '0px') {
+                toggleBG.css('background', '#68819c');
+                toggleActionStart(toggleFG, 'TO_RIGHT');
+            }
+           
+        });
+ 
+        // 토글 버튼 이동 모션 함수
+        function toggleActionStart(toggleBtn, LR) {
+            // 0.01초 단위로 실행
+            var intervalID = setInterval(
+                function() {
+                    // 버튼 이동
+                    var left = parseInt(toggleBtn.css('left'));
+                    left += (LR == 'TO_RIGHT') ? 5 : -5;
+                    if(left >= 0 && left <= 65) {
+                        left += 'px';
+                        toggleBtn.css('left', left);
+                        requestAnimationFrame(render);
+                    }
+                    if (left==0 || left==65) {
+                        console.log("변경!");
+                        requestAnimationFrame(render);
+                    }
+                }, 10);
+            setTimeout(function(){
+                clearInterval(intervalID);
+            }, 201);  
+        }
 
     </script>
 
 
     <script id="popumoveVertex" type="notjs">
-        
         #define M_PI 3.14159265358979323846
         precision highp float;
 
@@ -961,6 +1089,7 @@
         attribute float cnt;
         attribute float score;
         attribute float index;
+        attribute float sido;
 
         uniform int tidx;
         uniform vec4 trans;
@@ -969,9 +1098,12 @@
         uniform int onlyNearOn;
         uniform vec2 groundxy;
         uniform float widReducRatio;
+        uniform int sidoFlag;
+
         varying vec4 color;
         varying vec2 texValue;
         varying float isDiscard;
+
 
         float lineWidth = 1000.0;
         float drawMargin = 1000.0;
@@ -1018,9 +1150,14 @@
         vec4 middleColorRed = vec4(239.0 / 255.0, 0.0 / 255.0, 105.0 / 255.0, 1.0);
         vec4 middleColorMiddle = vec4(43.0 / 255.0, 26.0 / 255.0, 27.0 / 255.0, 1.0);
         float pow_ = 0.1;
+        
 
         void main() {           
             
+           
+
+            //int sidoFlag = 0x100000;
+
             //색상 결정
             vec4 colorOri, colorDes;          
             if (score<0.0) { //score가 음수면, 출발지가 고령화되는 이동임
@@ -1035,8 +1172,6 @@
                 colorDes = mix(middleColorMiddle, middleColorRed, colorC);        
             }
 
-
-            
 
             vec2 posf;
 
@@ -1055,7 +1190,62 @@
                      cnt>=float(countThreshold)?
                      1.0 : -1.0;
             } else {
-                isDiscard = cnt>=float(countThreshold)? 1.0 : -1.0;
+                float bool01 = cnt>=float(countThreshold)? 1.0 : -1.0;
+                int oricd = int(sido/100.0);
+                int descd = int(sido) - int(sido/100.0)*100;
+                int oribit = 1;
+                //webgl1 은 배열값을 가져오는 것도 안되고, switch도 안됨
+                if (oricd==0) oribit = 1;
+                else if (oricd==1) oribit = 2;
+                else if (oricd==2) oribit = 4;
+                else if (oricd==3) oribit = 8;
+                else if (oricd==4) oribit = 16;
+                else if (oricd==5) oribit = 32;
+                else if (oricd==6) oribit = 64;
+                else if (oricd==7) oribit = 128;
+                else if (oricd==8) oribit = 256;
+                else if (oricd==9) oribit = 512;
+                else if (oricd==10) oribit = 1024;
+                else if (oricd==11) oribit = 2048;
+                else if (oricd==12) oribit = 4096;
+                else if (oricd==13) oribit = 8192;
+                else if (oricd==14) oribit = 16384;
+                else if (oricd==15) oribit = 32768;
+                else if (oricd==16) oribit = 65536;
+
+                int desbit = 1;
+                if (descd==0) desbit = 1;
+                else if (descd==1) desbit = 2;
+                else if (descd==2) desbit = 4;
+                else if (descd==3) desbit = 8;
+                else if (descd==4) desbit = 16;
+                else if (descd==5) desbit = 32;
+                else if (descd==6) desbit = 64;
+                else if (descd==7) desbit = 128;
+                else if (descd==8) desbit = 256;
+                else if (descd==9) desbit = 512;
+                else if (descd==10) desbit = 1024;
+                else if (descd==11) desbit = 2048;
+                else if (descd==12) desbit = 4096;
+                else if (descd==13) desbit = 8192;
+                else if (descd==14) desbit = 16384;
+                else if (descd==15) desbit = 32768;
+                else if (descd==16) desbit = 65536;
+
+                int oriFlag = 0;               
+                int temp0 = sidoFlag / oribit;
+                int temp1 = temp0/2 * 2;
+                if (temp0!=temp1) oriFlag = 1;//같지 않으면 1의 자리가 1임
+             
+                int desFlag = 0;               
+                int temp2 = sidoFlag / desbit;
+                int temp3 = temp2/2 * 2;
+                if (temp2!=temp3) desFlag = 1;//같지 않으면 1의 자리가 1임
+                
+                
+                if (bool01 > 0.0) bool01 = (oriFlag == 0) ? -1.0 : 1.0;
+                if (bool01 > 0.0) bool01 = (desFlag == 0) ? -1.0 : 1.0;
+                isDiscard = bool01;
             }
             
 
@@ -1433,7 +1623,7 @@
     </script>
 
     <script id="popumoveFragment" type="notjs">
-       
+  
         precision highp float;
         varying vec4 color;
         varying vec2 texValue;
@@ -1485,8 +1675,83 @@
   
 </head>
 <body onload="main()">
-    <canvas id="glcanvas"></canvas>    
-    <canvas id="text"></canvas>
+    <div class="left_button">
+
+        <div class='toggleBG'>            
+            <button id ='sido0' class='toggleFG' ></button>
+            <txt class="toggleText">서울</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido1' class='toggleFG' ></button>
+            <txt class="toggleText">부산</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido2' class='toggleFG' ></button>
+            <txt class="toggleText">대구</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido3' class='toggleFG' ></button>
+            <txt class="toggleText">인천</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido4' class='toggleFG' ></button>
+            <txt class="toggleText">광주</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido5' class='toggleFG' ></button>
+            <txt class="toggleText">대전</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido6' class='toggleFG' ></button>
+            <txt class="toggleText">울산</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido7' class='toggleFG' ></button>
+            <txt class="toggleText">세종</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido8' class='toggleFG' ></button>
+            <txt class="toggleText">경기</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido9' class='toggleFG' ></button>
+            <txt class="toggleText">강원</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido10' class='toggleFG' ></button>
+            <txt class="toggleText">충북</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido11' class='toggleFG' ></button>
+            <txt class="toggleText">충남</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido12' class='toggleFG' ></button>
+            <txt class="toggleText">전북</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido13' class='toggleFG' ></button>
+            <txt class="toggleText">전남</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido14' class='toggleFG' ></button>
+            <txt class="toggleText">경북</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido15' class='toggleFG' ></button>
+            <txt class="toggleText">경남</txt>
+        </div>
+        <div class='toggleBG'>
+            <button id ='sido16' class='toggleFG' ></button>
+            <txt class="toggleText">제주</txt>
+        </div>
+
+    
+    </div>
+    <div class="main_canvas">
+        <canvas id="glcanvas"></canvas>    
+        <canvas id="text"></canvas>
+    </div>      
 </body>
 </html>
 
