@@ -90,7 +90,32 @@
             position: relative;
             
         }
+        .toggleBG1{
+            background: #143a5e;
+            width: 150px;
+            height: 30px;
+            border: 1px solid #eeeeee;
+            border-radius: 15px;
+            margin-top : 5px;
+            margin-bottom : 5px;
+        }
+        .toggleFG1{
+            background: #FFFFFF;
+            top : 3px;      
+            left : 125px;     
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 12px;
+            position: relative;            
+        }
+        .spacer{
+            
+            height: 13px;
 
+
+            position: relative;            
+        }
 
 
     </style>
@@ -127,6 +152,7 @@
             var groundxy;
             var widReducRatio;
             var sidoFlag;
+
 
            ShaderVars.prototype.setUniformLoc =  function () {
                 this.translation = gl.getUniformLocation(this.shader, "trans");                
@@ -307,7 +333,11 @@
             for (var i=0 ; i<=16 ; i++) {
                 var currentButton = getToggleBtnState("sido"+ i);
                 sidoFlag += currentButton << i;
-             }
+            }
+            var currentButton = getToggleBtnState("intraSido"); //시도내이동
+            sidoFlag += currentButton << 17;
+            var currentButton = getToggleBtnState("interSido"); //시도간이동
+            sidoFlag += currentButton << 18;
              //console.log(sidoFlag);
 
             //console.log("렌더");
@@ -460,8 +490,9 @@
                 
                 ctx.font = "bold 20px '맑은 고딕'";        
                 ctx.fillStyle = "rgba(200,200,200,1)";
-                ctx.fillText("시군구간 인구 순이동 ver 1.1", scrW/2,scrH-40);
+                ctx.fillText("시군구간 인구 순이동 ver 1.11", scrW/2,scrH-40);
                 //2021.04.28 ver 1.1 시도 토글버튼 추가
+                //2021.04.28 ver 1.11 시도 토글버튼 추가
 
                 ctx.font = "bold 80px '맑은 고딕'";  
                 ctx.fillStyle = "rgba(255,255,255,1)";
@@ -1041,34 +1072,48 @@
             return (v1[0]*v2[0] + v1[1]*v2[1]);
         }
 
+        //https://dororongju.tistory.com/110 참고
         $(document).on('click', '.toggleBG', function () {
             var toggleBG = $(this);
             var toggleFG = $(this).find('.toggleFG');
             var left = toggleFG.css('left');
             if(left == '65px') {
                 toggleBG.css('background', '#333333');
-                toggleActionStart(toggleFG, 'TO_LEFT');               
+                toggleActionStart(toggleFG, 'TO_LEFT', 65);               
             }else if(left == '0px') {
                 toggleBG.css('background', '#68819c');
-                toggleActionStart(toggleFG, 'TO_RIGHT');
+                toggleActionStart(toggleFG, 'TO_RIGHT', 65);
+            }
+           
+        });
+        $(document).on('click', '.toggleBG1', function () {
+            var toggleBG = $(this);
+            var toggleFG = $(this).find('.toggleFG1');
+            var left = toggleFG.css('left');
+            if(left == '125px') {
+                toggleBG.css('background', '#333333');
+                toggleActionStart(toggleFG, 'TO_LEFT', 125);               
+            }else if(left == '0px') {
+                toggleBG.css('background', '#143a5e');
+                toggleActionStart(toggleFG, 'TO_RIGHT', 125);
             }
            
         });
  
         // 토글 버튼 이동 모션 함수
-        function toggleActionStart(toggleBtn, LR) {
+        function toggleActionStart(toggleBtn, LR, leftMargin) {
             // 0.01초 단위로 실행
             var intervalID = setInterval(
                 function() {
                     // 버튼 이동
                     var left = parseInt(toggleBtn.css('left'));
                     left += (LR == 'TO_RIGHT') ? 5 : -5;
-                    if(left >= 0 && left <= 65) {
+                    if(left >= 0 && left <= leftMargin) {
                         left += 'px';
                         toggleBtn.css('left', left);
                         requestAnimationFrame(render);
                     }                    
-                }, 10);
+                }, 5);
             setTimeout(function(){
                 clearInterval(intervalID);
             }, 201);  
@@ -1095,6 +1140,7 @@
         uniform vec2 groundxy;
         uniform float widReducRatio;
         uniform int sidoFlag;
+
 
         varying vec4 color;
         varying vec2 texValue;
@@ -1228,19 +1274,27 @@
                 else if (descd==15) desbit = 32768;
                 else if (descd==16) desbit = 65536;
 
-                int oriFlag = 0;               
+                         
                 int temp0 = sidoFlag / oribit;
                 int temp1 = temp0/2 * 2;
-                if (temp0!=temp1) oriFlag = 1;//같지 않으면 1의 자리가 1임
+                if (temp0==temp1) bool01 = -1.0;//같지 않으면 1의 자리가 1임
              
-                int desFlag = 0;               
+                    
                 int temp2 = sidoFlag / desbit;
                 int temp3 = temp2/2 * 2;
-                if (temp2!=temp3) desFlag = 1;//같지 않으면 1의 자리가 1임
+                if (temp2==temp3) bool01 = -1.0;//같지 않으면 1의 자리가 1임
                 
-                
-                if (bool01 > 0.0) bool01 = (oriFlag == 0) ? -1.0 : 1.0;
-                if (bool01 > 0.0) bool01 = (desFlag == 0) ? -1.0 : 1.0;
+                //시도내이동
+                int temp4 = sidoFlag / 131072; //2^17
+                int temp5 = temp4/2 * 2;
+                if (temp4==temp5 && oricd==descd) bool01 = -1.0;
+
+
+                //시도간이동
+                int temp6 = sidoFlag / 262144; //2^18
+                int temp7 = temp6/2 * 2;
+                if (temp6==temp7 && oricd!=descd) bool01 = -1.0;
+
                 isDiscard = bool01;
             }
             
@@ -1672,6 +1726,16 @@
 </head>
 <body onload="main()">
     <div class="left_button">
+
+        <div class='toggleBG1'>            
+            <button id ='intraSido' class='toggleFG1' ></button>
+            <txt class="toggleText">시도내 이동</txt>
+        </div>
+        <div class='toggleBG1'>            
+            <button id ='interSido' class='toggleFG1' ></button>
+            <txt class="toggleText">시도간 이동</txt>
+        </div>
+        <div class='spacer'></div>  
 
         <div class='toggleBG'>            
             <button id ='sido0' class='toggleFG' ></button>
